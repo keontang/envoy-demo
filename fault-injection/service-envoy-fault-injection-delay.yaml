@@ -1,0 +1,73 @@
+static_resources:
+  listeners:
+  - address:
+      socket_address:
+        address: 0.0.0.0
+        port_value: 80
+    filter_chains:
+    - filters:
+      - name: envoy.http_connection_manager
+        config:
+          stat_prefix: ingress_http
+          codec_type: auto
+          add_user_agent: true
+          access_log:
+            - name: envoy.file_access_log
+              config:
+                path: "/tmp/envoy.log"
+                json_format:
+                  timestamp: "%START_TIME%"
+                  envoy.request_method: "%REQ(:METHOD)%"
+                  envoy.path: "%REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%"
+                  envoy.protocol: "%PROTOCOL%"
+                  envoy.response_code: "%RESPONSE_CODE%"
+                  envoy.request_user_agent: "%REQ(USER-AGENT)%"
+                  envoy.x-envoy-downstream-service-cluster: "%REQ(X-ENVOY-DOWNSTREAM-SERVICE-CLUSTER)%"
+                  envoy.x-envoy-downstream-service-node: "%REQ(X-ENVOY-DOWNSTREAM-SERVICE-NODE)%"
+          route_config:
+            name: local_route
+            virtual_hosts:
+            - name: service
+              domains:
+              - "*"
+              routes:
+              - match:
+                  prefix: "/service"
+                route:
+                  cluster: local_service
+          http_filters:
+          - name: envoy.lua
+            config:
+              inline_code: |
+                function envoy_on_request(request_handle)
+                  xsc = request_handle:headers():get("x-envoy-downstream-service-cluster")
+                  request_handle:logInfo(xsc)
+                  xsn = request_handle:headers():get("x-envoy-downstream-service-node")
+                  request_handle:logInfo(xsn)
+                end
+          - name: envoy.fault
+            config:
+              delay:
+                type: fixed
+                fixed_delay: 10s
+                percentage:
+                  numerator: 100
+                  denominator: HUNDRED
+          - name: envoy.router
+            config: {}
+  clusters:
+  - name: local_service
+    connect_timeout: 0.25s
+    type: strict_dns
+    lb_policy: round_robin
+    hosts:
+    - socket_address:
+        address: 127.0.0.1
+        port_value: 8080
+admin:
+  access_log_path: "/dev/null"
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 8081
+
